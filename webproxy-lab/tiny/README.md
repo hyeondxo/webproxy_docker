@@ -89,6 +89,61 @@ printf 'GET /home.html HTTP/1.0\r\n\r\n' | nc localhost 8000
 
 HTTP/1.0이므로 요청 후 연결은 닫힙니다(`Connection: close`).
 
+## Telnet 실습
+Telnet으로 직접 HTTP 요청 라인을 타이핑하며 Tiny의 동작을 관찰합니다.
+
+사전 준비: 서버 실행 중(`./tiny 8000`).
+
+1) Telnet 접속
+```bash
+telnet localhost 8000
+```
+
+2) 정적 파일 요청(Enter를 두 번 눌러 빈 줄로 헤더 종료)
+```
+GET /home.html HTTP/1.0\r\n
+```
+화면에 HTML이 출력됩니다.
+
+3) 이미지 요청(이진 데이터 주의)
+```
+GET /godzilla.jpg HTTP/1.0\r\n
+```
+터미널이 깨져 보일 수 있습니다. 저장하려면 telnet 대신 `nc`/`curl -o`를 사용하세요.
+
+4) CGI 호출(동적 컨텐츠)
+```
+GET /cgi-bin/adder?x=3&y=5 HTTP/1.0\r\n
+```
+CGI가 출력한 헤더와 본문(“3 + 5 = 8”)이 표시됩니다.
+
+팁
+- HTTP/1.0에서는 요청라인 다음에 반드시 빈 줄이 필요합니다. 빈 줄을 보내지 않으면 응답이 오지 않습니다.
+- HTTP/1.1로 시도하려면 `Host: localhost` 헤더를 추가하고 빈 줄을 보내세요.
+HTTP/1.1로 보내는 법
+
+필수: Host 헤더 포함 + 헤더 종료용 빈 줄
+
+예시(텔넷에서 Enter로 줄바꿈, 마지막에 빈 줄):
+
+GET /home.html HTTP/1.1
+Host: localhost
+Keep-Alive 원하면 명시:
+
+GET /home.html HTTP/1.1
+Host: localhost
+Connection: keep-alive
+즉시 닫고 싶으면:
+
+GET /home.html HTTP/1.1
+Host: localhost
+Connection: close
+Tip
+
+curl로 확인: curl -v http://localhost:1234/home.html
+HTTP/1.1에서도 Tiny는 요청 1개 처리 후 닫을 수 있으니, 연결 재사용은 서버 구현에 따라 달라집니다.
+- IPv6 이슈가 있으면 `telnet 127.0.0.1 8000`로 접속하세요.
+
 ## 트러블슈팅
 - 포트 충돌: 사용 중인 포트면 실패. 다른 포트를 사용하세요.
 - 404/403: 요청 파일이 없거나 읽기 권한이 없으면 에러 응답(파일 유형/권한 검사: `S_ISREG`, `S_IRUSR`).
