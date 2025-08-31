@@ -12,8 +12,8 @@ void doit(int fd);                // 한 연결(confd)를 처리하는 핵심 �
 void read_requesthdrs(rio_t *rp); // 요청 헤더들을 RIO로 줄 단위 읽기
 int parse_uri(char *uri, char *filename,
               char *cgiargs); // URI 해석 : 정적?동적? + 파일명/CGI 인자 분리(반환은 정적=1, 동적=0)
-void serve_static(int fd, char *filename, int filesize);            // 정적 파일 전송 : 헤더 작성 + 파일 바디 송신
-void get_filetype(char *filename, char *filetype);                  // 확장자로 MIME 타입 추정
+void serve_static(int fd, char *filename, int filesize, int is_head); // 정적 파일 전송 : 헤더 작성 + 파일 바디 송신
+void get_filetype(char *filename, char *filetype);                    // 확장자로 MIME 타입 추정
 void serve_dynamic(int fd, char *filename, char *cgiargs);          // 동적 컨텐츠 처리 : fork/execve + dup2로 CGI 실행
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, // 에러 응답 생성(상태줄/헤더/간단 HTML 바디)
                  char *longmsg);
@@ -46,6 +46,7 @@ int main(int argc, char **argv) {          // 서버 진입점 : ./tiny <port>
 // 한 HTTP 트랜잭션(한 연결의 한 요청)을 처리
 void doit(int fd) {
     int is_static;    // 정적 컨텐츠인지(1) 동적 컨텐츠인지(0) 표시
+    int is_head = 0;  // 헤더 옵션 유무 검사
     struct stat sbuf; // stat 결과(파일 타입/권한/크기)를 담을 구조체
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE],
         version[MAXLINE]; // 요청줄 파싱용 버퍼들 buf는 한 줄 전체 임시 저장, 나머지 3개는 sscanf로 각각 뽑아 저장
@@ -60,10 +61,13 @@ void doit(int fd) {
     sscanf(buf, "%s %s %s", method, uri, version); // 요청줄에서 메서드/URI/버전 분리
     // ex) method="GET", uri="/cgi-bin/adder?x=3&y=5", version="HTTP/1.0"
     // GET만 허용 아니면(대소문자 무시 비교), 0(false)이면 같음으로 처리하여 에러가 안남
-    if (strcasecmp(method, "GET")) {
+    if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) {
         clienterror(fd, method, "501", "Not implemented",   // 501 에러 응답 전송
                     "Tiny does not implement this method"); // Tiny는 GET만 지원
         return;                                             // 처리 종료(이 연결은 곧 닫힘)
+    }
+    if (!strcasecmp(method, "HEAD")) {
+        is_head = 1;
     }
     read_requesthdrs(&rio); // 이어지는 요청 헤더들을 (빈 줄(\r\n)까지) 줄 단위로 읽어서 소비
 
@@ -103,11 +107,16 @@ void doit(int fd) {
         // 3.	파일을 open→mmap해서 바디를 정확히 <크기> 바이트 전송 (메모리에서 빠르게 읽기)
         // 4.	munmap (메모리 해제)
         //  - 결과: 브라우저는 home.html 내용을 받음.
-        serve_static(fd, filename, sbuf.st_size); // OK: 응답 헤더 작성 후 파일 바디(sb.st_size 바이트) 전송
-    } else { /* Serve dynamic content */          // 동적 컨텐츠(CGI) 제공 경로
+        serve_static(fd, filename, sbuf.st_size, is_head); // OK: 응답 헤더 작성 후 파일 바디(sb.st_size 바이트) 전송
+    } else { /* Serve dynamic content */                   // 동적 컨텐츠(CGI) 제공 경로
         if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) { // 일반 파일인가? + 실행 권한이 있는가?
             clienterror(fd, filename, "403", "Forbidden",            // 아니면 403 (실행 불가)
                         "Tiny couldn't run the CGI program");
+            return;
+        }
+        if (is_head) {
+            clienterror(fd, method, "501", "Not implemented",    // 501 에러 응답 전송
+                        "Tiny does not implement HEAD for CGI"); // 동적 요청은 헤드 옵션이 없음
             return;
         }
         // serve_dynamic 동작 과정
@@ -253,7 +262,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs) {
  * filename : 보낼 디스크 파일 경로(ex : ./home.html)
  * filesize : 바디로 보낼 정확한 바이트 수
  */
-void serve_static(int fd, char *filename, int filesize) {
+void serve_static(int fd, char *filename, int filesize, int is_head) {
     // 디스크의 정적 파일을 열었을 때 얻는 파일 디스크립터
     // Open()의 결과를 담음.
     int srcfd;
@@ -278,6 +287,10 @@ void serve_static(int fd, char *filename, int filesize) {
     // 서버 콘솔(표준 출력)에 디버그용으로 방금 만든 헤더를 출력
     printf("Response headers:\n");
     printf("%s", buf);
+
+    if (is_head) { // 헤더만 보내야 한다면
+        return;    // 바디 전송 생략
+    }
 
     // 1. mmap 사용 방식
     // /* Send response body to client */ // 클라에게 파일 바디 전송
