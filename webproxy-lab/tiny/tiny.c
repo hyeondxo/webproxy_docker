@@ -261,6 +261,7 @@ void serve_static(int fd, char *filename, int filesize) {
     // filetype : 응답 헤더에 넣을 MIME 타입 문자열 버퍼 ex)text/html
     // buf : HTTP 응답 헤더를 담아두는 문자열 버퍼. 여기 있는 것들을 Rio_write로 전송
     char *srcp, filetype[MAXLINE], buf[MAXBUF];
+    char *bufp; // 파일 내용을 담을 동적 버퍼
 
     /* Send response headers to client */
     // 확장자로 MIME 타입 결정
@@ -278,36 +279,51 @@ void serve_static(int fd, char *filename, int filesize) {
     printf("Response headers:\n");
     printf("%s", buf);
 
-    /* Send response body to client */ // 클라에게 파일 바디 전송
-    // 정적 파일을 클라이언트에게 보내는 전형적인 Tiny 웹서버 패턴임
-    // 읽기 전용으로 파일을 열기
-    srcfd = Open(filename, O_RDONLY, 0);
-    // 파일 내용을 메모리에 매핑
-    // 인자 설명
-    // addr=0(NULL): 커널이 적당한 매핑 주소를 선택.
-    // length=filesize: 파일 크기만큼 매핑. 일반적으로 stat으로 얻은 크기를 사용.
-    // prot=PROT_READ: 읽기 전용 접근(쓰기 금지).
-    // flags=MAP_PRIVATE: 사본-쓰기(copy-on-write) 매핑. 여기서는 읽기만 하므로 사실상 원본은 변하지 않음.
-    //  - 읽을 때는 파일 내용을 그대로 공유해 보지만, 쓰려고 하면 그 순간 “내 것만의 복사본”이 생기고 파일은 안 바뀜
-    // 반대 개념 - MAP_SHARED: 쓰면 파일에도 반영(공유). 다른 프로세스와 내용이 공유됨.
-    // fd=srcfd, offset=0: 파일의 처음부터 매핑.
-    // 결과: srcp는 “파일 내용이 들어있는 연속 메모리”의 시작 주소를 가리킴.
-    // 이 포인터를 write에 그대로 넘겨 전송 가능.
-    srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
-    // 매핑 후 파일 디스크립터는 닫기. mmap으로 파일 내용을 매핑했기에 fd는 더이상 필요하지 않음
-    Close(srcfd);
-    // 매핑된 파일 내용을 소켓으로 정확히 filesize 바이트를 전송
-    // fd는 클라이언트 소켓. srcp는 매핑 메모리, filesize는 전송해야 할 바이트 수
-    Rio_writen(fd, srcp, filesize);
-    // 메모리 매핑 해제. 전송 완료 후 사용한 자원을 정리하는 것
-    Munmap(srcp, filesize);
-    /**
-     * 왜 mmap을 쓰는가?
-     * 파일 내용을 파일을 메모리처럼 다룰 수 있음. 다수의 read 호출 대신 한 번의 mmap으로
-     * 포인터만으로 파일을 전송할 수 있는 느낌
-     * read->write로 한 줄씩 일일히 복사하는 방식보다 단순하고 빠름. 하지만 큰 파일이라면
-     * 메모리 압박이 증가하기 때문에 비교적 작은 파일에서 이 방식을 사용하는 것이 좋음
-     */
+    // 1. mmap 사용 방식
+    // /* Send response body to client */ // 클라에게 파일 바디 전송
+    // // 정적 파일을 클라이언트에게 보내는 전형적인 Tiny 웹서버 패턴임
+    // // 읽기 전용으로 파일을 열기
+    // srcfd = Open(filename, O_RDONLY, 0);
+    // // 파일 내용을 메모리에 매핑
+    // // 인자 설명
+    // // addr=0(NULL): 커널이 적당한 매핑 주소를 선택.
+    // // length=filesize: 파일 크기만큼 매핑. 일반적으로 stat으로 얻은 크기를 사용.
+    // // prot=PROT_READ: 읽기 전용 접근(쓰기 금지).
+    // // flags=MAP_PRIVATE: 사본-쓰기(copy-on-write) 매핑. 여기서는 읽기만 하므로 사실상 원본은 변하지 않음.
+    // //  - 읽을 때는 파일 내용을 그대로 공유해 보지만, 쓰려고 하면 그 순간 “내 것만의 복사본”이 생기고 파일은 안 바뀜
+    // // 반대 개념 - MAP_SHARED: 쓰면 파일에도 반영(공유). 다른 프로세스와 내용이 공유됨.
+    // // fd=srcfd, offset=0: 파일의 처음부터 매핑.
+    // // 결과: srcp는 “파일 내용이 들어있는 연속 메모리”의 시작 주소를 가리킴.
+    // // 이 포인터를 write에 그대로 넘겨 전송 가능.
+    // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+    // // 매핑 후 파일 디스크립터는 닫기. mmap으로 파일 내용을 매핑했기에 fd는 더이상 필요하지 않음
+    // Close(srcfd);
+    // // 매핑된 파일 내용을 소켓으로 정확히 filesize 바이트를 전송
+    // // fd는 클라이언트 소켓. srcp는 매핑 메모리, filesize는 전송해야 할 바이트 수
+    // Rio_writen(fd, srcp, filesize);
+    // // 메모리 매핑 해제. 전송 완료 후 사용한 자원을 정리하는 것
+    // Munmap(srcp, filesize);
+    // /**
+    //  * 왜 mmap을 쓰는가?
+    //  * 파일 내용을 파일을 메모리처럼 다룰 수 있음. 다수의 read 호출 대신 한 번의 mmap으로
+    //  * 포인터만으로 파일을 전송할 수 있는 느낌
+    //  * read->write로 한 줄씩 일일히 복사하는 방식보다 단순하고 빠름. 하지만 큰 파일이라면
+    //  * 메모리 압박이 증가하기 때문에 비교적 작은 파일에서 이 방식을 사용하는 것이 좋음
+    //  */
+
+    // 2. malloc + Rio_readn + Rio_writen 사용
+    srcfd = Open(filename, O_RDONLY, 0); // 디스크 파일 열기
+    bufp = (char *)Malloc(filesize);     // 파일 크기만큼 버퍼 동적 할당
+    Rio_readn(srcfd, bufp, filesize);    // 파일에서 정확히 filesize 바이트 읽기
+    Close(srcfd);                        // FD는 더이상 필요 없음
+    Rio_writen(fd, bufp, filesize);      // 소켓으로 그대로 쓰기
+    Free(bufp);                          // 동적 버퍼 해제
+    // 동작 과정
+    // 1.	헤더 전송: MIME 타입(get_filetype)과 Content-length를 포함해 HTTP 헤더를 전송.
+    // 2.	파일 읽기: 일반 파일 FD에서 Rio_readn(srcfd, bufp, filesize)를 호출하면,
+    //    OS가 파일 오프셋 0부터 filesize 바이트를 읽어 bufp에 채움.
+    // 3.	소켓 쓰기: Rio_writen(fd, bufp, filesize)는 바로 그 바이트를 네트워크로 보냄
+    // 4.	해제: 파일 FD 닫고, 동적 버퍼를 free.
 }
 
 // 파일 이름의 확장자를 보고 MIME 타입을 정해주는 함수
