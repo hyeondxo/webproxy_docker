@@ -1,15 +1,33 @@
 <html>
-<head><title>test</title></head>
-<body> 
-  <div style="margin: 1rem 0;">
-    <img align="middle" src="godzilla.gif">
-    <p>Dave O'Hallaron</p></body>
-    <div">
-        <h3>CS:APP quiz 11.7 - MPG(MP4)</h3>
+
+<head>
+    <title>test</title>
+</head>
+
+<body>
+    <div style="margin: 2rem 0;">
+        <img align="middle" src="godzilla.gif" alt="godzilla">
+        <p>Dave O'Hallaron</p>
+    </div>
+    <!-- CS:APP 11.7 -->
+    <div style="margin: 2rem 0;">
+        <h3>CS:APP 11.7</h3>
         <video controls width="640">
-        <source src="./sample.mp4" type="video/mp4">
+            <source src="./sample.mp4" type="video/mp4">
+            Your browser does not support the video tag.
         </video>
     </div>
-  </div>
-  
+    <!-- CS:APP 11.10 -->
+    <div id="adder-form" style="margin: 2rem 0;">
+        <h3>CS:APP 11.10</h3>
+        <form action="/cgi-bin/adder" method="get">
+            <label for="x">x:</label>
+            <input id="x" name="x" type="text" style="width: 6rem;" />
+            <label for="y" style="margin-left:.5rem;">y:</label>
+            <input id="y" name="y" type="text" style="width: 6rem;" />
+            <button type="submit" style="margin-left: .5rem;">Add</button>
+        </form>
+    </div>
+</body>
+
 </html>
