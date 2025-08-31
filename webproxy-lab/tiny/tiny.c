@@ -323,6 +323,10 @@ void get_filetype(char *filename, char *filetype) {
         strcpy(filetype, "image/png");
     else if (strstr(filename, ".jpg"))
         strcpy(filetype, "image/jpeg");
+    else if (strstr(filename, ".mp4")) // mp4
+        strcpy(filetype, "video/mp4");
+    else if (strstr(filename, ".mpg") || strstr(filename, ".mpeg")) // mpg
+        strcpy(filetype, "video/mpeg");
     else // 아무 것도 해당되지 않으면 그냥 text/plaian
         strcpy(filetype, "text/plain");
 }
