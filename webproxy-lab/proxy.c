@@ -29,6 +29,9 @@ static int open_listenfd_s(const char *port);                                   
 static ssize_t writen_all(int fd, const void *buf, size_t n);      // 부분쓰기까지 처리하는 write 루프
 static int read_full_line(rio_t *rp, char **out, size_t *len_out); // 1줄을 끝까지 모아 반환(RIO 사용)
 
+// Part II 동시성 구현부 포함: 연결당 스레드 생성/분리(detached)
+#include "thread.c"
+
 // 리스닝 소켓 생성
 // SIGPIPE 무시(클라이언트/서버 조기 종료 시 write에서 죽지 않도록)
 // accept 루프에서 순차적으로 연결 1건씩 처리
@@ -56,7 +59,7 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    for (;;) {                          // 무한 루프: 순차 처리
+    for (;;) {                          // 무한 루프: 동시 처리(연결당 스레드 생성)
         clientlen = sizeof(clientaddr); // 주소 버퍼 크기 지정
         do {
             // accept는 시그널로 깨어나면 EINTR 반환 가능 -> 재시도
@@ -68,8 +71,12 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        handle_client(connfd); // 단일 요청 처리
-        close(connfd);         // 처리 후 반드시 소켓 닫기
+        // 연결당 스레드 생성: 스레드 내부에서 handle_client 호출 및 FD 정리
+        if (spawn_detached_worker(connfd) != 0) {
+            fprintf(stderr, "pthread_create failed: %s\n", strerror(errno));
+            // 실패 시 spawn_detached_worker가 FD를 닫았으므로 다음 연결로 진행
+            continue;
+        }
     }
 
     close(listenfd); // 도달하지 않지만 정리
