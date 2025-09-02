@@ -1,29 +1,42 @@
-# Makefile for Proxy Lab 
-#
-# You may modify this file any way you like (except for the handin
-# rule). You instructor will type "make" on your specific Makefile to
-# build your proxy from sources.
+CC ?= gcc
+CFLAGS ?= -g -Wall -Wextra -O2 -I . -I tiny
+LDFLAGS ?=
 
-CC = gcc
-CFLAGS = -g -Wall
-LDFLAGS = -lpthread
+PROXY_BIN := proxy
+TINY_BIN := tiny/tinyserver
+TINYSRC := tiny
 
-all: proxy
+PORT ?= 8000
+PROXY_PORT ?= 15213
 
-csapp.o: csapp.c csapp.h
-	$(CC) $(CFLAGS) -c csapp.c
+.PHONY: all clean run run-tiny run-proxy
 
-proxy.o: proxy.c csapp.h
-	$(CC) $(CFLAGS) -c proxy.c
+all: $(PROXY_BIN) $(TINY_BIN)
 
-proxy: proxy.o csapp.o
-	$(CC) $(CFLAGS) proxy.o csapp.o -o proxy $(LDFLAGS)
+$(PROXY_BIN): proxy.o tiny/csapp.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-# Creates a tarball in ../proxylab-handin.tar that you can then
-# hand in. DO NOT MODIFY THIS!
-handin:
-	(make clean; cd ..; tar cvf $(USER)-proxylab-handin.tar proxylab-handout --exclude tiny --exclude nop-server.py --exclude proxy --exclude driver.sh --exclude port-for-user.pl --exclude free-port.sh --exclude ".*")
+$(TINY_BIN): $(TINYSRC)/tiny.o $(TINYSRC)/csapp.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+proxy.o: proxy.c tiny/csapp.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(TINYSRC)/tiny.o: $(TINYSRC)/tiny.c $(TINYSRC)/csapp.h
+	$(CC) $(CFLAGS) -I $(TINYSRC) -c -o $@ $<
+
+$(TINYSRC)/csapp.o: $(TINYSRC)/csapp.c $(TINYSRC)/csapp.h
+	$(CC) $(CFLAGS) -I $(TINYSRC) -c -o $@ $<
+
+run: run-tiny run-proxy
+
+run-tiny: $(TINY_BIN)
+	cd $(TINYSRC) && ./tinyserver $(PORT)
+
+run-proxy: $(PROXY_BIN)
+	./$(PROXY_BIN) $(PROXY_PORT)
 
 clean:
-	rm -f *~ *.o proxy core *.tar *.zip *.gzip *.bzip *.gz
-
+	rm -f *~ *.o core *.tar *.zip *.gzip *.bzip *.gz
+	rm -f $(PROXY_BIN) $(TINY_BIN)
+	rm -f $(TINYSRC)/*.o

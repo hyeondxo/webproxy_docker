@@ -154,45 +154,77 @@ void doit(int fd) {
  * shortmsg : 짧은 이유 (ex : "Not Found")
  * longmsg : 설명 문장(ex : "Tiny couldn't find this file"
  */
+// void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) {
+//     // buf : 헤더 한 줄을 만들 때 쓰는 임시 버퍼
+//     // body : HTML 본문을 누적해서 만드는 버퍼
+//     char buf[MAXLINE], body[MAXBUF];
+
+//     /* Build the HTTP response body */
+//     // body를 HTML 시작과 <title>로 초기화
+//     sprintf(body, "<html><title>Tiny Error</title>");
+//     // 기존 body 뒤에 <body>태그를 이어붙이고 배경을 흰색으로 지정 문자열 안의 "를 표현하기 위해 \"를 두 번 사용
+//     sprintf(body, "%s<body bgcolor=\"\"ffffff\"\">\r\n", body);
+//     // ex) 404: Not found 한 줄 추가 - 상태 코드와 짧은 사유를 보여줌
+//     sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
+//     // ex) Tiny couldn't find this file: ./nope.html\r\n과 같은 자세한 설명을 <p>단락으로 추가
+//     sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
+//     // 수평선과 서버 제목을 추가
+//     sprintf(body, "%s<hr><em>The Tiny Web server</em>\r\n", body);
+
+//     // sprintf: 지정한 형식대로 문자열을 만들어 buf 메모리에 채워 넣기. 끝에 NUL 추가.
+//     // Rio_writen(fd, buf, n): buf의 앞에서부터 정확히 n바이트가 fd(소켓/파일)에 모두 쓰일 때까지 반복해서 write를
+//     호출
+
+//     /* Print the HTTP response */
+//     // 상태줄 만들기. ex) HTTP/1.0 404  Not found\r\n
+//     sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
+//     Rio_writen(fd, buf, strlen(buf));
+//     // 응답 바디가 html임을 알림.
+//     sprintf(buf, "Content-type: text/html\r\n");
+//     Rio_writen(fd, buf, strlen(buf));
+//     // 바디의 바이트 길이를 정확히 기록하고 빈 줄로 헤더 종료를 알림
+//     sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
+//     Rio_writen(fd, buf, strlen(buf));
+//     // 아까 만든 HTML 바디를 그대로 전송
+//     Rio_writen(fd, body, strlen(body));
+
+//     // doit 내부에서는 이 함수를 이런 식으로 호출함
+//     // clienterror(fd,
+//     //         "./nope.html",        // cause
+//     //         "404",                // errnum
+//     //         "Not found",          // shortmsg
+//     //         "Tiny couldn't find this file"); // longmsg
+// }
+
+// 안전한 방식으로 헤더/본문을 한 번에 구성해 전송
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg) {
-    // buf : 헤더 한 줄을 만들 때 쓰는 임시 버퍼
-    // body : HTML 본문을 누적해서 만드는 버퍼
-    char buf[MAXLINE], body[MAXBUF];
-
-    /* Build the HTTP response body */
-    // body를 HTML 시작과 <title>로 초기화
-    sprintf(body, "<html><title>Tiny Error</title>");
-    // 기존 body 뒤에 <body>태그를 이어붙이고 배경을 흰색으로 지정 문자열 안의 "를 표현하기 위해 \"를 두 번 사용
-    sprintf(body, "%s<body bgcolor=\"\"ffffff\"\">\r\n", body);
-    // ex) 404: Not found 한 줄 추가 - 상태 코드와 짧은 사유를 보여줌
-    sprintf(body, "%s%s: %s\r\n", body, errnum, shortmsg);
-    // ex) Tiny couldn't find this file: ./nope.html\r\n과 같은 자세한 설명을 <p>단락으로 추가
-    sprintf(body, "%s<p>%s: %s\r\n", body, longmsg, cause);
-    // 수평선과 서버 제목을 추가
-    sprintf(body, "%s<hr><em>The Tiny Web server</em>\r\n", body);
-
-    // sprintf: 지정한 형식대로 문자열을 만들어 buf 메모리에 채워 넣기. 끝에 NUL 추가.
-    // Rio_writen(fd, buf, n): buf의 앞에서부터 정확히 n바이트가 fd(소켓/파일)에 모두 쓰일 때까지 반복해서 write를 호출
-
-    /* Print the HTTP response */
-    // 상태줄 만들기. ex) HTTP/1.0 404  Not found\r\n
-    sprintf(buf, "HTTP/1.0 %s %s\r\n", errnum, shortmsg);
-    Rio_writen(fd, buf, strlen(buf));
-    // 응답 바디가 html임을 알림.
-    sprintf(buf, "Content-type: text/html\r\n");
-    Rio_writen(fd, buf, strlen(buf));
-    // 바디의 바이트 길이를 정확히 기록하고 빈 줄로 헤더 종료를 알림
-    sprintf(buf, "Content-length: %d\r\n\r\n", (int)strlen(body));
-    Rio_writen(fd, buf, strlen(buf));
-    // 아까 만든 HTML 바디를 그대로 전송
-    Rio_writen(fd, body, strlen(body));
-
-    // doit 내부에서는 이 함수를 이런 식으로 호출함
-    // clienterror(fd,
-    //         "./nope.html",        // cause
-    //         "404",                // errnum
-    //         "Not found",          // shortmsg
-    //         "Tiny couldn't find this file"); // longmsg
+    char hdr[MAXLINE]; // 보낼 HTTP 응답 “헤더 전체”를 담을 버퍼.
+    char body[MAXBUF]; // 보낼 HTTP 응답 “바디(HTML)”를 담을 버퍼.
+    // snprintf: 지정한 형식대로 문자열을 만들어 buf 메모리에 채워 넣기. 끝에 NUL 추가.
+    // 반환값: 출력된 문자열 길이(널 종료 문자 제외). 출력이 잘린 경우 음수 반환
+    // body에 HTML 바디 전체를 안전하게 작성
+    int blen = snprintf(body, sizeof(body),
+                        "<html><title>Tiny Error</title>"
+                        "<body bgcolor=\"ffffff\">%s: %s<br>%s: %s"
+                        "<hr><em>The Tiny Web server</em></body></html>",
+                        errnum, shortmsg, longmsg, cause);
+    if (blen < 0) // snprintf 실패 대비. 음수 길이를 0으로 보정
+        blen = 0;
+    if (blen > (int)sizeof(body)) // 혹시 길이 값이 버퍼를 넘는 경우 상한으로 보정
+        blen = (int)sizeof(body);
+    // 응답 헤더 문자열을 한 번에 생성해 hdr 버퍼에 작성
+    int hlen = snprintf(hdr, sizeof(hdr),
+                        "HTTP/1.0 %s %s\r\n"
+                        "Content-type: text/html\r\n"
+                        "Connection: close\r\n"
+                        "Content-length: %d\r\n\r\n",
+                        errnum, shortmsg, blen);
+    // 헤더 길이가 유효하면 rio_writen으로 헤더 전송
+    if (hlen > 0)
+        Rio_writen(fd, hdr, (size_t)hlen);
+    // 바디 길이가 유효하면 생성한 HTML 바디를 소켓에 보냄
+    if (blen > 0)
+        Rio_writen(fd, body, (size_t)blen);
 }
 
 // 요청 헤더들을 줄 단위로 읽어서 버리는(소비하는) 함수
@@ -275,18 +307,18 @@ void serve_static(int fd, char *filename, int filesize, int is_head) {
     /* Send response headers to client */
     // 확장자로 MIME 타입 결정
     get_filetype(filename, filetype);
-    // 상태 줄부터 buf에 써넣음
-    sprintf(buf, "HTTP/1.0 200 OK\r\n");
-    // 기존 버퍼 뒤에 계속 이어붙임.
-    sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
-    sprintf(buf, "%sConnection: close\r\n", buf);
-    sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-    sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-    // 다 쓰고 늘 그랬듯 안전하게 전송.
-    Rio_writen(fd, buf, strlen(buf));
-    // 서버 콘솔(표준 출력)에 디버그용으로 방금 만든 헤더를 출력
-    printf("Response headers:\n");
-    printf("%s", buf);
+    // 응답 헤더를 buf에 안전하게 저장
+    int hlen = snprintf(buf, sizeof(buf),
+                        "HTTP/1.0 200 OK\r\n"
+                        "Server: Tiny Web Server\r\n"
+                        "Connection: close\r\n"
+                        "Content-length: %d\r\n"
+                        "Content-type: %s\r\n\r\n",
+                        filesize, filetype);
+    if (hlen < 0)
+        hlen = 0;
+    Rio_writen(fd, buf, (size_t)hlen);
+    printf("Response headers:\n%s", buf);
 
     if (is_head) { // 헤더만 보내야 한다면
         return;    // 바디 전송 생략

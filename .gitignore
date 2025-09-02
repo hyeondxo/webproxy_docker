@@ -1,58 +1,11 @@
-# MacOS
-.DS_Store
-.AppleDouble
-.LSOverride
-._*
-
-# Prerequisites
-*.d
-
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
-
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
-*.idb
-*.pdb
-
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# Ignore build artifacts and binaries
+webproxy-lab/proxy
+webproxy-lab/tiny/tinyserver
+webproxy-lab/*.o
+webproxy-lab/tiny/*.o
+webproxy-lab/core
+webproxy-lab/*.tar
+webproxy-lab/*.zip
+webproxy-lab/*.gz
+webproxy-lab/*.gzip
+webproxy-lab/*.bzip
