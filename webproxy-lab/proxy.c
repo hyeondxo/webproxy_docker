@@ -2,6 +2,7 @@
 //   - 요구사항: HTTP/1.0 기반 GET 프록시, 헤더 재작성(Host/User-Agent/Connection/
 //   Proxy-Connection), 바이너리 안전 응답 중계, 동시성/캐시 없음
 
+#include "cache.h"  // Part III: 캐시 API(MAX_CACHE_SIZE/MAX_OBJECT_SIZE 포함)
 #include "csapp.h"  // RIO(견고한 I/O), 소켓 래퍼(Open_listenfd 등), 에러 처리 매크로 포함
 #include <ctype.h>  // isdigit 등 문자인식 매크로
 #include <errno.h>  // errno 상수
@@ -24,6 +25,7 @@ static int parse_uri(const char *uri, char *host, size_t hsz, char *path, size_t
 static int connect_end_server(const char *host, int port); // 원서버에 TCP connect()
 static int forward_request_headers(rio_t *client_rio, int serverfd, const char *host, int port); // 헤더 재작성/전송
 static void relay_response(int serverfd, int clientfd);                                 // 서버->클라 응답 스트리밍
+static void relay_and_maybe_cache(int serverfd, int clientfd, const char *key);         // 스트리밍 + (조건부)캐시
 static void clienterror(int fd, int status, const char *shortmsg, const char *longmsg); // 간단한 에러 응답 생성
 static int open_listenfd_s(const char *port);                                           // getaddrinfo 기반 리스닝 소켓
 static ssize_t writen_all(int fd, const void *buf, size_t n);      // 부분쓰기까지 처리하는 write 루프
@@ -53,6 +55,8 @@ int main(int argc, char **argv) {
     sigemptyset(&sa.sa_mask);      // 빈 시그널 집합으로 초기화
     sigaction(SIGPIPE, &sa, NULL); // SIGPIPE에 대해 sa 설정
 
+    // 리스닝 시작 전 캐시 초기화
+    cache_init();                        // Part III: 캐시 초기화(다중 리더/단일 라이터 보장)
     listenfd = open_listenfd_s(argv[1]); // 리스닝 소켓 생성
     if (listenfd < 0) {                  // 실패 시 에러 출력 후 종료
         fprintf(stderr, "Error: cannot open listen socket on port %s\n", argv[1]);
@@ -121,6 +125,28 @@ static void handle_client(int connfd) {
         clienterror(connfd, 400, "Bad Request", "Only supports absolute HTTP URLs"); // 400
         return;
     }
+    // 원 서버에 연결하기 전 먼저 캐시를 확인
+    // 캐시 키 생성: 스킴/호스트/포트/경로를 정규화하여 문자열로 구성
+    char cache_key[MAXLINE];
+    if (snprintf(cache_key, sizeof(cache_key), "http://%s:%d%s", host, port, path) <= 0) {
+        clienterror(connfd, 400, "Bad Request", "Failed to build cache key");
+        return;
+    }
+
+    // 캐시 조회: HIT이면 서버 연결 없이 즉시 전송하고 반환
+    {
+        char *cached = NULL;
+        size_t csz = 0;
+        int hit = cache_get(cache_key, &cached, &csz); // 캐시 조회
+        if (hit < 0) {
+            // 캐시 내부 오류는 무시하고 네트워크 경로로 진행
+        } else if (hit == 1) {
+            // 원서버에 연결하지 않고 캐시에서 가져온 바이트를 그대로 클라이언트 소켓으로 전송
+            (void)writen_all(connfd, cached, csz);
+            free(cached); // cache_get이 복사본을 반환했기 때문에, 사용이 끝나면 해제해야함
+            return;
+        }
+    }
 
     // 원서버 TCP 연결 시도
     serverfd = connect_end_server(host, port);
@@ -148,8 +174,8 @@ static void handle_client(int connfd) {
         return;
     }
 
-    // 서버 응답을 클라이언트로 스트리밍(바이너리 안전)
-    relay_response(serverfd, connfd);
+    // 서버 응답을 클라이언트로 스트리밍(바이너리 안전) + 캐시 후보 누적/삽입
+    relay_and_maybe_cache(serverfd, connfd, cache_key);
 
     // 원서버 소켓 정리
     close(serverfd);
@@ -320,6 +346,48 @@ static void relay_response(int serverfd, int clientfd) {
             break; // 클라 조기 종료같은 상황이면 탈출
         }
     }
+}
+
+// 원서버에서 받은 응답을 클라이언트로 스트리밍하면서 전체 크기가 한도(100KiB)이하일 때만 캐시에 저장
+// serverfd : 원서버와 연결된 소켓 fd
+// clientfd : 클라이언트와 연결된 소켓 fd
+// key : 캐시 식별자(정규화된 URI 문자열)
+static void relay_and_maybe_cache(int serverfd, int clientfd, const char *key) {
+    rio_t rio_server; // rio 상태 객체
+    char buf[MAXBUF]; // 서버에서 읽은 데이터를 담을 임시 버퍼
+    ssize_t n;        // 매번 읽은 바이트 수를 받는 변수
+
+    // 캐시 후보 버퍼를 한 번에 최대 크리고 확보
+    char *obj = (char *)malloc(MAX_OBJECT_SIZE);
+    size_t cap = obj ? MAX_OBJECT_SIZE : 0; // 올바르게 크기가 할당되었는지
+    size_t used = 0;                        // 현재까지 후보 버퍼 사용량
+    int caching = obj != NULL;              // 캐싱 가능 여부 플래그. 후보 버퍼의 메모리가 할당되어야 함
+
+    Rio_readinitb(&rio_server, serverfd); // 원서버 소켓에 대해 rio 초기화
+
+    // 서버에서 가용한 만큼 읽기를 반복
+    while ((n = rio_readnb(&rio_server, buf, sizeof(buf))) > 0) {
+        // 방금 읽은 바이트를 즉시 클라이언트로 전송. 0 미만이 나오면 끊긴 것
+        if (writen_all(clientfd, buf, (size_t)n) < 0) {
+            break;
+        }
+        // 캐시 후보 버퍼를 쓰고 있는 경우에만 시도
+        if (caching) {
+            // 현재 누적된 크기 + 새로 읽은 크기가 최대 용량 cap을 넘지 않으면
+            if (used + (size_t)n <= cap) {
+                memcpy(obj + used, buf, (size_t)n); // 후보 버퍼에 그대로 이어붙임
+                used += (size_t)n;                  // 사용량도 갱신
+            } else {                                // 최대 용량 초과 시 더이상 캐시하지 않음
+                caching = 0;
+            }
+        }
+    }
+    // 응답을 끝까지 받아 누적한 총 크기가 0보다 크고
+    // 초과 없이 모두 담았을 경우 캐시에 삽입
+    if (caching && used > 0) {
+        cache_put(key, obj, used);
+    }
+    free(obj); // 캐시 후보 임시 버퍼 해제
 }
 
 // clienterror: 간단한 HTML 에러 응답 생성 및 전송

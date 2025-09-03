@@ -13,13 +13,16 @@ PROXY_PORT ?= 15213
 
 all: $(PROXY_BIN) $(TINY_BIN)
 
-$(PROXY_BIN): proxy.o tiny/csapp.o
+$(PROXY_BIN): proxy.o cache.o tiny/csapp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(TINY_BIN): $(TINYSRC)/tiny.o $(TINYSRC)/csapp.o
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 proxy.o: proxy.c tiny/csapp.h
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+cache.o: cache.c cache.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(TINYSRC)/tiny.o: $(TINYSRC)/tiny.c $(TINYSRC)/csapp.h
